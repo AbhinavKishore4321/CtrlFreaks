@@ -15,7 +15,7 @@ scanner = URLScanner()
 blacklist = BlacklistDB()
 
 # Force Python to look in the exact same folder where app.py lives
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'phishshield_blacklist.db')
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'URL.db')
 
 # ==========================================
 # 🗄️ SQLITE HELPER FUNCTION
