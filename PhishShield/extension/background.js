@@ -1,18 +1,23 @@
 // PhishShield Background Service Worker
-// Auto-scans pages and sets badge color based on risk
+// Auto-scans pages and updates badge on tab load
 
 const cache = new Map();
+const CACHE_TTL = 300_000; // 5 minutes
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete' || !tab.url) return;
   if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
 
-  // Check cache (valid for 5 minutes)
+  // Serve from cache if fresh
   const cached = cache.get(tab.url);
-  if (cached && (Date.now() - cached.ts) < 300000) {
+  if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
     updateBadge(tabId, cached.verdict, cached.score);
     return;
   }
+
+  // Show scanning indicator
+  chrome.action.setBadgeText({ tabId, text: '…' });
+  chrome.action.setBadgeBackgroundColor({ tabId, color: '#1c2a36' });
 
   try {
     const resp = await fetch('http://localhost:5000/scan', {
@@ -20,19 +25,27 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: tab.url })
     });
+
+    if (!resp.ok) throw new Error('API error');
+
     const data = await resp.json();
     cache.set(tab.url, { verdict: data.verdict, score: data.risk_score, ts: Date.now() });
     updateBadge(tabId, data.verdict, data.risk_score);
+
   } catch {
-    // API not available
+    // API unavailable — clear badge silently
     chrome.action.setBadgeText({ tabId, text: '' });
   }
 });
 
 function updateBadge(tabId, verdict, score) {
-  const colors = { PHISHING: '#ff3a5c', SUSPICIOUS: '#ffb800', SAFE: '#00ff88' };
-  const labels = { PHISHING: '!', SUSPICIOUS: '?', SAFE: '✓' };
+  const config = {
+    PHISHING:   { color: '#ff3a5c', text: '!' },
+    SUSPICIOUS: { color: '#ffcc00', text: '?' },
+    SAFE:       { color: '#00ff9d', text: '✓' },
+  };
 
-  chrome.action.setBadgeBackgroundColor({ tabId, color: colors[verdict] || '#666' });
-  chrome.action.setBadgeText({ tabId, text: labels[verdict] || '' });
+  const c = config[verdict] ?? { color: '#3a5568', text: '·' };
+  chrome.action.setBadgeBackgroundColor({ tabId, color: c.color });
+  chrome.action.setBadgeText({ tabId, text: c.text });
 }
