@@ -3,23 +3,18 @@ import os
 import urllib.parse
 import tldextract
 
-BLACKLIST_FILE = os.path.join(os.path.dirname(__file__), 'blacklist.json')
+BLACKLIST_FILE = os.path.join(os.path.dirname(__file__), 'seed_blacklist.json')
+SEED_BLACKLIST_FILE = os.path.join(os.path.dirname(__file__), 'seed_blacklist.txt')
 
-# Pre-seeded known phishing/malicious domains
-SEED_BLACKLIST = [
-    "http://paypa1.com/login",
-    "http://amaz0n-secure.xyz/verify",
-    "http://microsoft-support-alert.tk",
-    "http://appleid-verify.ml/signin",
-    "http://secure-login-google.gq",
-    "http://facebook-account-verify.cf",
-    "http://netfl1x-billing.top/update",
-    "http://192.168.1.1/phish",
-    "http://login.paypal.account-verify.com",
-    "http://bankofamerica-secure.xyz",
-    "http://update-your-account.info/login",
-    "http://steam-giftcard-winner.click",
-]
+def get_seed_blacklist() -> list:
+    """Reads the initial blacklist URLs from a text file."""
+    if not os.path.exists(SEED_BLACKLIST_FILE):
+        print(f"⚠️ Warning: Seed file '{SEED_BLACKLIST_FILE}' not found.")
+        return []
+    
+    with open(SEED_BLACKLIST_FILE, 'r', encoding='utf-8') as f:
+        # Strip whitespace and ignore empty lines
+        return [line.strip() for line in f if line.strip()]
 
 class BlacklistDB:
     def __init__(self):
@@ -32,8 +27,8 @@ class BlacklistDB:
                 data = json.load(f)
                 self.blacklist = set(data.get('urls', []))
         else:
-            # Seed with known bad URLs
-            self.blacklist = set(SEED_BLACKLIST)
+            # Seed with known bad URLs from the text file instead of the hardcoded list
+            self.blacklist = set(get_seed_blacklist())
             self._save()
 
     def _save(self):
