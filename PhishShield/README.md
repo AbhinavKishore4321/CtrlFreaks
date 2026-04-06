@@ -2,14 +2,11 @@
 
 > **Real-time phishing URL detection powered by heuristic analysis and ML-inspired scoring.**
 
----
-
-## 🚀 Quick Start
 
 ### Prerequisites
 - Python 3.8+
 - pip
-- Modern web browser
+- Modern web browser (Supports JS)
 
 ### 1. Install Backend Dependencies
 
@@ -50,6 +47,7 @@ phishshield/
 └── extension/
     ├── manifest.json    # Chrome extension manifest (v3)
     ├── popup.html       # Extension popup UI
+    |-- popup.js         # Logic extension
     ├── background.js    # Auto-scan service worker
     └── content.js       # Page link analyzer
 ```
@@ -71,7 +69,7 @@ Scan a URL for phishing indicators.
 {
   "url": "https://suspicious-site.xyz/login",
   "verdict": "PHISHING",
-  "verdict_label": "🚨 Likely Phishing",
+  "verdict_label": "!! Likely Phishing",
   "risk_score": 82,
   "scan_time_ms": 12.5,
   "signals": [
@@ -105,7 +103,7 @@ Health check endpoint.
 
 ---
 
-## 🧠 How It Works
+## Working of Truth Score
 
 PhishShield uses **20+ heuristic signals** to calculate a risk score (0–100):
 
@@ -125,13 +123,13 @@ PhishShield uses **20+ heuristic signals** to calculate a risk score (0–100):
 | Trusted domain | -30 | Known legitimate site |
 
 **Risk Score → Verdict:**
-- 0–44: ✅ **SAFE**
-- 45–74: ⚠️ **SUSPICIOUS**
-- 75–100: 🚨 **PHISHING**
+- 75-100:  **SAFE**
+- 45–74:  **SUSPICIOUS**
+- 0–44:  **PHISHING**
 
 ---
 
-## 🔒 Browser Extension Setup
+##  Browser Extension Setup
 
 1. Open Chrome → `chrome://extensions/`
 2. Enable **Developer Mode** (top right)
@@ -146,7 +144,7 @@ PhishShield uses **20+ heuristic signals** to calculate a risk score (0–100):
 
 ---
 
-## 🗄️ Blacklist Database
+##  Blacklist Database
 
 The blacklist is stored in `backend/blacklist.json` and pre-seeded with known phishing URLs. It supports:
 
@@ -157,7 +155,7 @@ The blacklist is stored in `backend/blacklist.json` and pre-seeded with known ph
 
 ---
 
-## ⚙️ Engineering Challenges & Solutions
+##  Engineering Challenges & Solutions
 
 | Challenge | Solution |
 |-----------|----------|
@@ -172,15 +170,15 @@ The blacklist is stored in `backend/blacklist.json` and pre-seeded with known ph
 
 ## 🔮 Bonus Features Implemented
 
-- ✅ **Blacklist DB** with domain-level matching
-- ✅ **Browser Extension** (Chrome MV3) with auto-scanning
-- ✅ **Link analyzer** content script that highlights suspicious links on any page
-- ✅ **Persistent stats** (total scans, threats found, safe URLs)
-- ✅ **Report export** (copy scan report to clipboard)
+- 1. **Blacklist DB** with domain-level matching
+- 2. **Browser Extension** (Chrome MV3) with auto-scanning
+- 3. **Link analyzer** content script that highlights suspicious links on any page
+- 4. **Persistent stats** (total scans, threats found, safe URLs)
+- 5. **Report export** (copy scan report to clipboard)
 
 ---
 
-## 📊 Tech Stack
+##  Tech Stack Used
 
 | Layer | Technology |
 |-------|-----------|
@@ -196,12 +194,12 @@ The blacklist is stored in `backend/blacklist.json` and pre-seeded with known ph
 
 | URL | Expected |
 |-----|----------|
-| `https://google.com` | ✅ SAFE |
-| `http://paypa1-secure.verify-account.xyz/login` | 🚨 PHISHING |
-| `http://192.168.1.1/admin` | 🚨 PHISHING |
-| `https://bit.ly/3abc` | ⚠️ SUSPICIOUS |
-| `http://microsoft-support-alert.tk` | 🚨 PHISHING |
-| `https://github.com` | ✅ SAFE |
+| `https://google.com` |  SAFE |
+| `http://paypa1-secure.verify-account.xyz/login` |  PHISHING |
+| `http://192.168.1.1/admin` |  PHISHING |
+| `https://bit.ly/3abc` |  SUSPICIOUS |
+| `http://microsoft-support-alert.tk` |  PHISHING |
+| `https://github.com` |  SAFE |
 
 ---
 
