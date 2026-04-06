@@ -3,6 +3,8 @@ import urllib.parse
 import tldextract
 import socket
 import math
+import requests
+import os
 from datetime import datetime
 
 # Known phishing keywords
@@ -46,12 +48,15 @@ class URLScanner:
         features = self._extract_features(url)
         risk_score, signals = self._calculate_risk(features, url, blacklist)
 
-        # Determine verdict
-        if risk_score >= 75:
+        # INVERT SCORE: 100 Risk becomes 0 Trust. 0 Risk becomes 100 Trust.
+        trust_score = max(0, min(100, 100 - risk_score))
+
+        # Determine verdict based on Trust Score
+        if trust_score <= 25:
             verdict = "PHISHING"
             verdict_label = "🚨 Likely Phishing"
             self.phishing_detected += 1
-        elif risk_score >= 45:
+        elif trust_score <= 55:
             verdict = "SUSPICIOUS"
             verdict_label = "⚠️ Suspicious"
         else:
@@ -63,7 +68,8 @@ class URLScanner:
             "url": url,
             "verdict": verdict,
             "verdict_label": verdict_label,
-            "risk_score": risk_score,
+            "trust_score": trust_score,
+            "risk_score": trust_score, # Keep this key so frontend doesn't break if partially updated
             "features": features,
             "signals": signals,
             "scanned_at": datetime.utcnow().isoformat() + "Z"
@@ -82,230 +88,188 @@ class URLScanner:
             # IP address check
             is_ip = bool(re.match(r'^\d{1,3}(\.\d{1,3}){3}$', parsed.netloc.split(':')[0]))
 
-            # URL length
-            url_length = len(url)
+            # --- 1. DNS RESOLUTION CHECK ---
+            domain_exists = False
+            try:
+                if domain:
+                    socket.gethostbyname(domain)
+                    domain_exists = True
+            except socket.error:
+                domain_exists = False
+
+            # --- 2. LIVE HTTP PROBE ---
+            is_live = False
+            final_url = url
+            if domain_exists:
+                try:
+                    # Timeout set to 3s to prevent the API from hanging
+                    resp = requests.head(url, timeout=3, allow_redirects=True)
+                    is_live = resp.status_code < 400
+                    final_url = resp.url
+                except requests.RequestException:
+                    pass
 
             # Count special chars
             special_chars = len(re.findall(r'[@!$%^&*#~]', url))
-
-            # Count dots in subdomain
             subdomain_dots = subdomain.count('.') if subdomain else 0
-
-            # HTTPS check
-            has_https = url.startswith('https://')
-
-            # Suspicious keywords in URL
+            
+            # Feature extraction
             found_keywords = [kw for kw in PHISHING_KEYWORDS if kw in full_url]
-
-            # TLD check
             tld = '.' + ext.suffix if ext.suffix else ''
-            is_suspicious_tld = tld in SUSPICIOUS_TLDS
-
-            # Domain length
-            domain_length = len(domain)
-
-            # Hyphen count in domain
-            hyphen_count = domain.count('-')
-
-            # Digit count in domain
-            digit_count = sum(c.isdigit() for c in domain)
-
-            # URL entropy (randomness)
             entropy = self._calculate_entropy(domain)
-
-            # Path depth
-            path_depth = len([p for p in path.split('/') if p])
-
-            # Query params count
-            query_params = len(urllib.parse.parse_qs(query))
-
-            # Is trusted domain
             is_trusted = any(domain.endswith(td) for td in TRUSTED_DOMAINS)
-
-            # Brand impersonation check
             brand_impersonation = self._check_brand_impersonation(domain, subdomain, full_url)
-
-            # Short URL check
+            has_redirect = 'redirect' in full_url or 'redir' in full_url or 'url=' in full_url or (final_url != url)
+            
             is_short_url = domain in [
                 'bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly',
                 'short.io', 'rebrand.ly', 'is.gd', 'buff.ly', 'adf.ly',
                 'tiny.cc', 'cutt.ly', 'shorturl.at'
             ]
 
-            # Redirect indicators
-            has_redirect = 'redirect' in full_url or 'redir' in full_url or 'url=' in full_url
-
-            # Encoded characters
-            has_encoding = '%' in url and len(re.findall(r'%[0-9a-fA-F]{2}', url)) > 2
-
             return {
                 "domain": domain,
                 "subdomain": subdomain,
                 "tld": tld,
+                "domain_exists": domain_exists,
+                "is_live": is_live,
+                "final_url": final_url,
                 "is_ip_address": is_ip,
-                "url_length": url_length,
-                "has_https": has_https,
+                "url_length": len(url),
+                "has_https": url.startswith('https://'),
                 "special_chars_count": special_chars,
                 "subdomain_depth": subdomain_dots + (1 if subdomain else 0),
                 "phishing_keywords": found_keywords,
                 "keyword_count": len(found_keywords),
-                "is_suspicious_tld": is_suspicious_tld,
-                "domain_length": domain_length,
-                "hyphen_count": hyphen_count,
-                "digit_count": digit_count,
+                "is_suspicious_tld": tld in SUSPICIOUS_TLDS,
+                "domain_length": len(domain),
+                "hyphen_count": domain.count('-'),
+                "digit_count": sum(c.isdigit() for c in domain),
                 "domain_entropy": round(entropy, 3),
-                "path_depth": path_depth,
-                "query_params_count": query_params,
+                "path_depth": len([p for p in path.split('/') if p]),
+                "query_params_count": len(urllib.parse.parse_qs(query)),
                 "is_trusted_domain": is_trusted,
                 "brand_impersonation": brand_impersonation,
                 "is_short_url": is_short_url,
                 "has_redirect": has_redirect,
-                "has_encoding": has_encoding,
+                "has_encoding": '%' in url and len(re.findall(r'%[0-9a-fA-F]{2}', url)) > 2,
             }
         except Exception as e:
             return {"error": str(e)}
 
     def _calculate_entropy(self, s: str) -> float:
-        if not s:
-            return 0
-        freq = {}
-        for c in s:
-            freq[c] = freq.get(c, 0) + 1
+        if not s: return 0
+        freq = {c: s.count(c) for c in set(s)}
         length = len(s)
         return -sum((count/length) * math.log2(count/length) for count in freq.values())
 
     def _check_brand_impersonation(self, domain: str, subdomain: str, full_url: str) -> list:
-        brands = ['paypal', 'amazon', 'google', 'microsoft', 'apple', 'netflix',
-                  'facebook', 'instagram', 'twitter', 'linkedin', 'dropbox',
-                  'yahoo', 'outlook', 'office365', 'chase', 'bankofamerica',
-                  'wellsfargo', 'citibank', 'ebay', 'walmart', 'coinbase']
+        brands = ['paypal', 'amazon', 'google', 'microsoft', 'apple', 'netflix', 'facebook']
         found = []
         for brand in brands:
             if brand in full_url:
-                # Is it actually the real domain?
                 real_domains = [f'{brand}.com', f'{brand}.net', f'{brand}.org']
                 if not any(domain == rd for rd in real_domains):
                     found.append(brand)
         return found
+
+    def _check_google_safe_browsing(self, url: str) -> bool:
+        """Checks URL against Google Safe Browsing API if key is present."""
+        api_key = os.environ.get("SAFE_BROWSING_API_KEY")
+        if not api_key: return False
+        
+        api_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={api_key}"
+        payload = {
+            "client": {"clientId": "phishshield", "clientVersion": "1.0"},
+            "threatInfo": {
+                "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"],
+                "platformTypes": ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries": [{"url": url}]
+            }
+        }
+        try:
+            resp = requests.post(api_url, json=payload, timeout=3)
+            if resp.status_code == 200 and resp.json().get('matches'):
+                return True
+        except:
+            pass
+        return False
 
     def _calculate_risk(self, features: dict, url: str, blacklist=None) -> tuple:
         score = 0
         signals = []
 
         if 'error' in features:
-            return 50, [{"type": "error", "msg": "Could not parse URL", "weight": 0}]
+            return 100, [{"type": "error", "msg": "Could not parse URL", "weight": -100}]
 
-        # --- Blacklist check (highest priority) ---
+        # --- High Priority Checks ---
         if blacklist and blacklist.is_blacklisted(url):
-            score += 100
-            signals.append({"type": "critical", "msg": "URL found in blacklist database", "weight": 100})
-            return min(score, 100), signals
+            return 100, [{"type": "critical", "msg": "URL found in local blacklist database", "weight": -100}]
 
-        # --- IP address as domain ---
+        if self._check_google_safe_browsing(url):
+            return 100, [{"type": "critical", "msg": "Flagged by Google Safe Browsing API", "weight": -100}]
+
+        # --- Active Probing Signals ---
+        if not features.get('domain_exists'):
+            score += 40
+            signals.append({"type": "info", "msg": "Domain does not exist or DNS resolution failed (Dead Link)", "weight": -40})
+        elif not features.get('is_live'):
+            score += 20
+            signals.append({"type": "warning", "msg": "Server is unreachable or refusing connections", "weight": -20})
+
+        # --- Heuristics ---
         if features.get('is_ip_address'):
             score += 35
-            signals.append({"type": "danger", "msg": "Uses raw IP address instead of domain name", "weight": 35})
+            signals.append({"type": "danger", "msg": "Uses raw IP address instead of domain name", "weight": -35})
 
-        # --- No HTTPS ---
         if not features.get('has_https'):
             score += 12
-            signals.append({"type": "warning", "msg": "No HTTPS encryption (HTTP only)", "weight": 12})
+            signals.append({"type": "warning", "msg": "No HTTPS encryption (HTTP only)", "weight": -12})
 
-        # --- Trusted domain bonus ---
         if features.get('is_trusted_domain'):
-            score -= 30
-            signals.append({"type": "safe", "msg": "Domain matches known trusted website", "weight": -30})
+            score -= 40
+            signals.append({"type": "safe", "msg": "Domain matches known trusted website", "weight": +40})
 
-        # --- Brand impersonation ---
         brands = features.get('brand_impersonation', [])
         if brands:
             score += 35
-            signals.append({"type": "critical", "msg": f"Impersonating brand(s): {', '.join(brands)}", "weight": 35})
+            signals.append({"type": "critical", "msg": f"Impersonating brand(s): {', '.join(brands)}", "weight": -35})
 
-        # --- Suspicious TLD ---
         if features.get('is_suspicious_tld'):
             score += 15
-            signals.append({"type": "danger", "msg": f"Suspicious TLD: {features.get('tld')}", "weight": 15})
+            signals.append({"type": "danger", "msg": f"Suspicious TLD: {features.get('tld')}", "weight": -15})
 
-        # --- Phishing keywords ---
         kw_count = features.get('keyword_count', 0)
         if kw_count >= 4:
             score += 25
-            signals.append({"type": "danger", "msg": f"{kw_count} phishing keywords detected: {', '.join(features['phishing_keywords'][:5])}", "weight": 25})
+            signals.append({"type": "danger", "msg": f"{kw_count} phishing keywords detected", "weight": -25})
         elif kw_count >= 2:
             score += 12
-            signals.append({"type": "warning", "msg": f"{kw_count} phishing keywords found: {', '.join(features['phishing_keywords'])}", "weight": 12})
-        elif kw_count == 1:
-            score += 5
-            signals.append({"type": "info", "msg": f"Phishing keyword found: {features['phishing_keywords'][0]}", "weight": 5})
+            signals.append({"type": "warning", "msg": f"Phishing keywords found: {', '.join(features['phishing_keywords'])}", "weight": -12})
 
-        # --- URL length ---
         length = features.get('url_length', 0)
         if length > 200:
             score += 15
-            signals.append({"type": "danger", "msg": f"Very long URL ({length} chars) — typical obfuscation tactic", "weight": 15})
-        elif length > 100:
-            score += 7
-            signals.append({"type": "warning", "msg": f"Unusually long URL ({length} chars)", "weight": 7})
+            signals.append({"type": "danger", "msg": f"Very long URL ({length} chars) — typical obfuscation", "weight": -15})
 
-        # --- Deep subdomain ---
-        sub_depth = features.get('subdomain_depth', 0)
-        if sub_depth >= 3:
+        if features.get('subdomain_depth', 0) >= 3:
             score += 18
-            signals.append({"type": "danger", "msg": f"Deeply nested subdomain (depth {sub_depth}) — common phishing pattern", "weight": 18})
-        elif sub_depth == 2:
-            score += 8
-            signals.append({"type": "warning", "msg": "Multiple subdomain levels detected", "weight": 8})
+            signals.append({"type": "danger", "msg": "Deeply nested subdomain", "weight": -18})
 
-        # --- Hyphens in domain ---
-        hyphens = features.get('hyphen_count', 0)
-        if hyphens >= 3:
+        if features.get('domain_entropy', 0) > 3.8:
             score += 12
-            signals.append({"type": "danger", "msg": f"Many hyphens in domain ({hyphens}) — often used to mimic legitimate sites", "weight": 12})
-        elif hyphens >= 1:
-            score += 4
-            signals.append({"type": "info", "msg": f"Hyphens in domain name ({hyphens})", "weight": 4})
+            signals.append({"type": "warning", "msg": "High domain randomness (entropy) — may be auto-generated", "weight": -12})
 
-        # --- Domain entropy (randomness) ---
-        entropy = features.get('domain_entropy', 0)
-        if entropy > 3.8:
-            score += 12
-            signals.append({"type": "danger", "msg": f"High domain randomness (entropy: {entropy}) — may be auto-generated", "weight": 12})
-
-        # --- Special characters ---
-        spec = features.get('special_chars_count', 0)
-        if spec >= 3:
-            score += 10
-            signals.append({"type": "warning", "msg": f"Suspicious special characters in URL ({spec})", "weight": 10})
-
-        # --- Redirect indicators ---
         if features.get('has_redirect'):
             score += 10
-            signals.append({"type": "warning", "msg": "URL contains redirect parameters", "weight": 10})
+            signals.append({"type": "warning", "msg": "URL contains redirect parameters or actively forwards traffic", "weight": -10})
 
-        # --- Encoded characters ---
-        if features.get('has_encoding'):
-            score += 8
-            signals.append({"type": "warning", "msg": "URL contains heavy character encoding (obfuscation)", "weight": 8})
-
-        # --- Short URL ---
         if features.get('is_short_url'):
             score += 10
-            signals.append({"type": "warning", "msg": "URL shortener detected — hides true destination", "weight": 10})
+            signals.append({"type": "warning", "msg": "URL shortener detected — hides true destination", "weight": -10})
 
-        # --- Query param overload ---
-        qp = features.get('query_params_count', 0)
-        if qp >= 5:
-            score += 8
-            signals.append({"type": "warning", "msg": f"Excessive query parameters ({qp})", "weight": 8})
-
-        # --- Digits in domain ---
-        digits = features.get('digit_count', 0)
-        if digits >= 4:
-            score += 6
-            signals.append({"type": "info", "msg": f"Many digits in domain name ({digits})", "weight": 6})
-
-        # Clamp score
+        # Clamp score between 0 and 100
         score = max(0, min(100, score))
         return round(score), signals
 
